@@ -2,8 +2,8 @@
 
 -export([analyze/1]).
 
-%% @doc Find gc roots and explicitly mark when they go out of scope, based
-%% on the liveness analyzis performed by the hipe_rtl_liveness:analyze/1.
+%% @doc Find GC roots and explicitly mark when they go out of scope, based
+%% on the liveness analysis performed by the hipe_rtl_liveness:analyze/1.
 analyze(RtlCfg) ->
   Liveness = hipe_rtl_liveness:analyze(RtlCfg),
   Roots = find_roots(RtlCfg, Liveness),
@@ -11,10 +11,9 @@ analyze(RtlCfg) ->
   NewRtlCfg = mark_dead_roots(RtlCfg, Liveness, Roots),
   {NewRtlCfg, Roots}.
 
-%% @doc Determine which are the GC Roots.Possible roots are all
-%% RTL variables (rtl_var). However, since safe points are function calls, we
-%% consider as possible GC roots only RTL variables that are live around
-%% function calls.
+%% @doc Determine which are the GC Roots. Possible roots are all RTL variables
+%% (rtl_var). However, since function calls are the safe-points, we consider as
+%% possible GC roots only RTL variables that are live around function calls.
 find_roots(Cfg, Liveness) ->
   Labels = hipe_rtl_cfg:postorder(Cfg),
   Roots = find_roots_bb(Labels, Cfg, Liveness, []),
@@ -28,15 +27,15 @@ find_roots_bb([L|Ls], Cfg, Liveness, RootAcc) ->
   LiveIn = ordsets:from_list(strip(hipe_rtl_liveness:livein(Liveness, L))),
   LiveOut = ordsets:from_list(strip(hipe_rtl_liveness:liveout(Liveness, L))),
   Roots = do_find_roots_bb(BlockCode, L, LiveOut, LiveIn, []),
-  find_roots_bb(Ls, Cfg, Liveness, Roots++RootAcc).
+  find_roots_bb(Ls, Cfg, Liveness, Roots ++ RootAcc).
 
-%% For each call inside a BB the GC roots are those RTL variables that
-%% are live before and after the call.
-%% --> Live Before Call: These are the RTL variables that belong to the
-%% LiveIn list or are initialized inside the BB before the call
-%% --> Live After Call: These are the RTL variables that belong to the
-%% LiveOut list or are used after the call inside the BB (they die
-%% inside the BB and so do not belong to the LiveOut list)
+%% For each call inside a BB the GC roots are those RTL variables that are live
+%% before and after the call.
+%%     Live Before Call: These are the RTL variables that belong to the LiveIn
+%% list or are initialized inside the BB before the call.
+%%     Live After Call: These are the RTL variables that belong to the LiveOut
+%% list or are used after the call inside the BB (they die inside the BB and so
+%% don't belong to the LiveOut list).
 do_find_roots_bb([], _Label, _LiveOut, _LiveBefore, RootAcc) ->
   RootAcc;
 do_find_roots_bb([I|Is], L, LiveOut, LiveBefore, RootAcc) ->
@@ -59,9 +58,9 @@ do_find_roots_bb([I|Is], L, LiveOut, LiveBefore, RootAcc) ->
       do_find_roots_bb(Is, L, LiveOut, LiveBefore1, RootAcc)
   end.
 
-%% @doc This function is responsible for marking when GC Roots, which can be
-%% only RTL variables go out of scope (dead). This pass is needed for the LLVM
-%% back end because the LLVM framework forces us to explicit mark when gc roots
+%% @doc This function is responsible for marking when GC Roots, which can only
+%% be RTL variables, go out-of-scope (die). This pass is needed for the LLVM
+%% backend because the LLVM framework forces us to explicit mark when GC roots
 %% are no longer live.
 mark_dead_roots(CFG, Liveness, Roots) ->
   Labels = hipe_rtl_cfg:postorder(CFG),
@@ -91,7 +90,7 @@ do_mark_dead_bb([I|Is], LiveOut ,Roots, NewBlockCode) ->
   LiveAfter = ordsets:union(LiveOut, UsedAfter),
   %% GC roots that their last use is in this instruction
   DeadRoots = ordsets:subtract(RootsUsed, LiveAfter),
-  %% Recreate the RTL variable from the corresponding Index
+  %% Re-create the RTL variable from the corresponding Index
   OldVars = [hipe_rtl:mk_var(V1) || V1 <- DeadRoots],
   %% Mark the RTL variable as DEAD (last use)
   NewVars = [kill_var(V2) || V2 <- OldVars],
@@ -100,13 +99,15 @@ do_mark_dead_bb([I|Is], LiveOut ,Roots, NewBlockCode) ->
   Subtitution = lists:zip(OldVars, NewVars),
   NewI = case Subtitution of
     [] -> I;
-    _ -> hipe_rtl:subst_uses_llvm(Subtitution, I)
+    _  -> hipe_rtl:subst_uses_llvm(Subtitution, I)
   end,
   do_mark_dead_bb(Is, LiveOut, Roots, [NewI|NewBlockCode]).
 
-%% Update the liveness of a var,in order to mark that this is the last use.
-kill_var(Var) -> hipe_rtl:var_liveness_update(Var, dead).
+%% Update the liveness of a var in order to mark that this is the last use.
+kill_var(Var) ->
+  hipe_rtl:var_liveness_update(Var, dead).
 
-%% We are only interested for rtl_vars, since only rtl_vars are possible gc
+%% We are only interested in rtl_vars, since only rtl_vars are possible GC
 %% roots.
-strip(L) -> [Y || {rtl_var, Y, _} <- L].
+strip(L) ->
+  [Y || {rtl_var, Y, _} <- L].
